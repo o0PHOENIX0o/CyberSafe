@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Shield, BookOpen, AlertCircle, BarChart3, Home, Volume2, Globe, Settings, Gamepad2, Terminal, User, ChevronDown, ChevronUp, Swords, Moon, Sun, Download } from 'lucide-react'
+import { Shield, BookOpen, AlertCircle, BarChart3, Home, Volume2, Globe, Settings, Gamepad2, Terminal, User, ChevronDown, ChevronUp, Swords, Moon, Sun, Download, ScanEye } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -33,6 +33,7 @@ export function Sidebar({ onLanguageChange, currentLanguage = 'en', onAccessibil
   const navItems = [
     { href: '/', icon: Home, label: 'Home', id: 'home' },
     { href: '/scanner', icon: Shield, label: 'Scam Scanner', id: 'scanner' },
+    { href: '/deepfake', icon: ScanEye, label: 'Deepfake Detector', id: 'deepfake' },
     { href: '/learn', icon: BookOpen, label: 'Learn', id: 'learn' },
     { 
       id: 'practice', 

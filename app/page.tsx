@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Sidebar } from '@/components/sidebar'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Shield, BookOpen, AlertCircle, BarChart3, ArrowRight, Gamepad2, Terminal } from 'lucide-react'
+import { Shield, BookOpen, AlertCircle, BarChart3, ArrowRight, Gamepad2, Terminal, ScanEye } from 'lucide-react'
 import Link from 'next/link'
 
 export default function Home() {
@@ -42,6 +42,14 @@ export default function Home() {
       href: '/simulator',
       color: 'from-indigo-600 to-violet-600',
       accentColor: 'bg-indigo-100 dark:bg-indigo-900/30',
+    },
+    {
+      icon: ScanEye,
+      title: 'Deepfake Detector',
+      description: 'Upload audio or video to detect AI-generated deepfakes using WavLM voice analysis and CNN-BiLSTM video forensics.',
+      href: '/deepfake',
+      color: 'from-violet-600 to-pink-600',
+      accentColor: 'bg-violet-100 dark:bg-violet-900/30',
     },
     {
       icon: AlertCircle,
