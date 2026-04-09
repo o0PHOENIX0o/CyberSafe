@@ -104,7 +104,7 @@ export function Sidebar({ onLanguageChange, currentLanguage = 'en', onAccessibil
                 className="w-full flex items-center justify-center gap-3 px-4 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl transition-all font-bold shadow-[0_0_20px_rgba(16,185,129,0.3)] hover:shadow-[0_0_25px_rgba(16,185,129,0.5)] transform hover:-translate-y-0.5"
               >
                 <Shield className="w-5 h-5 animate-pulse" />
-                <span>Get Side-car Extension</span>
+                <span>Get CyberSafe Extension</span>
               </button>
             </div>
           </div>
@@ -242,7 +242,7 @@ export function Sidebar({ onLanguageChange, currentLanguage = 'en', onAccessibil
             <div className="p-6 border-b border-border bg-muted/30">
               <h2 className="text-xl font-bold flex items-center gap-2">
                 <Shield className="w-5 h-5 text-emerald-500" />
-                Side-car Installation
+                CyberSafe Installation
               </h2>
               <p className="text-sm text-muted-foreground mt-2 font-sans">
                 Due to Chrome Web Store publishing times, this developer preview requires a manual 3-step installation.

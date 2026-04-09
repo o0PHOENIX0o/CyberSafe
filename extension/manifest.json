@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "CyberSafe Side-car",
+  "name": "CyberSafe",
   "version": "1.0",
   "description": "Real-time AI threat intelligence scanner overlay for your browser.",
   "permissions": [

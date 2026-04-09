@@ -5,7 +5,7 @@
 ## 🚀 Key Features
 
 -   **Scam Scanner**: Real-time multi-vector analysis of Text, URLs, and Emails using a weighted heuristic engine.
--   **Side-car Extension**: A Chrome extension (Manifest V3) that injects safety markers directly into the DOM of third-party sites (Gmail, LinkedIn, etc.) to flag suspicious links before the click.
+-   **Extension**: Proactive local scanner injected into the user's browser for real-time protection.
 -   **Phishing Gauntlet**: A high-stakes, time-pressured game mode to train users in identifying malicious patterns.
 -   **Cyber Guard Ranks**: A gamified progression system (Cadet to Cyber Guard) with live safety points and localized threat visualization.
 -   **Homoglyph Detection**: Advanced engine to spot visually deceptive URLs (e.g., `pаypal.com` using Cyrillic characters).
@@ -37,7 +37,7 @@
 4. Select the `extension/` folder from this directory.
 
 ## 🛡️ Problem Statement
-90% of data breaches are caused by human error. CyberSafe addresses the "Human Firewall" failure by providing immediate, non-technical feedback and proactive protection where users spend most of their time: their browser.
+95% of data breaches are caused by human error. CyberSafe addresses the "Human Firewall" failure by providing immediate, non-technical feedback and proactive protection where users spend most of their time: their browser.
 
 ## 📜 References
 - Aligned with **NIST Cybersecurity Framework** and **CISA's Zero Trust Maturity Model**.

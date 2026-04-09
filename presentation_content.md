@@ -85,6 +85,6 @@ This document provides a deep-dive into the **CyberSafe** project. Use these spe
 ## 6. Research and References: Authoritative Foundations
 ### Grounded in Expert Knowledge
 *   **Regulatory Frameworks**: Aligned with the **NIST Cybersecurity Framework (CSF)** and **CISA's Zero Trust Maturity Model**.
-*   **Global Threat Data**: Derived from **IC3 (FBI) Internet Crime Reports (2023)** and **CERT-In** security advisories.
+*   **Global Threat Data**: Derived from **IC3 (FBI) Internet Crime Reports (2025)** and **CERT-In** security advisories.
 *   **Educational Psychology**: Implementation of **Gamification Theory** and **Cognitive Load Theory** from MIT and Stanford studies to optimize digital learning.
 *   **Technical Benchmarks**: Built following **OWASP Top 10** guidelines for web application security and **W3C Accessibility Standards (WCAG 2.1)**.
