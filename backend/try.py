@@ -1,54 +1,51 @@
-import os
 import cv2
-import tempfile
-import numpy as np
 import torch
 import torch.nn as nn
-import streamlit as st
+import numpy as np
+import collections
+import threading
+import queue
+import time
 from PIL import Image
-from torchvision import transforms
-from ultralytics import YOLO
-from torchvision import models
-import plotly.graph_objects as go
-import plotly.express as px
-from datetime import datetime
-import warnings
-warnings.filterwarnings('ignore')
+from torchvision import models, transforms
+from ultralytics import YOLO 
 
-# =========================================================
+# =========================
 # CONFIGURATION
-# =========================================================
+# =========================
+# ✅ YOUR SPECIFIC VIDEO PATH
+import os
+
+# VIDEO_PATH = r"C:\Users\ASUS\Desktop\Deepfake\celebs\Celeb-synthesis\id0_id1_0006.mp4"
+# VIDEO_PATH = r"C:\Users\ASUS\Downloads\video6181738633767165691.mp4"
+VIDEO_PATH = r"C:\Users\ASUS\Pictures\Camera Roll\WIN_20260413_20_23_12_Pro.mp4"
+# ✅ YOUR TRAINED MODEL
+MODEL_PATH = r"C:\Users\ASUS\Desktop\CyberSafe\CyberSafe\ALL MODELS\best_celebdf_model_Krish.pt" 
+
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-FRAMES = 16
-IMG_SIZE = 224
+INPUT_SIZE = 224
+SEQ_LENGTH = 16        
+CONFIDENCE_THRESHOLD = 0.60
+EMA_ALPHA = 0.15       
 
-# Path to your trained model - UPDATE THIS PATH
-MODEL_PATH = r"/home/krish-sharma/Desktop/cyber Security/CyberSafe/ALL MODELS/best_celebdf_model_Krish.pt"  # Make sure this file exists
-
-# =========================================================
-# MODEL DEFINITION (MUST MATCH TRAINING ARCHITECTURE)
-# =========================================================
+# =========================
+# MODEL DEFINITION
+# =========================
 class CNN_BiLSTM(nn.Module):
     def __init__(self):
         super().__init__()
-        backbone = models.efficientnet_b0(weights=None)
+        weights = models.EfficientNet_B0_Weights.IMAGENET1K_V1
+        backbone = models.efficientnet_b0(weights=weights)
         self.cnn = backbone.features
         self.pool = nn.AdaptiveAvgPool2d(1)
 
         self.lstm = nn.LSTM(
-            input_size=1280,
-            hidden_size=256,
-            num_layers=2,
-            bidirectional=True,
-            batch_first=True,
-            dropout=0.3
+            input_size=1280, hidden_size=256, num_layers=2, 
+            bidirectional=True, batch_first=True, dropout=0.3
         )
 
         self.classifier = nn.Sequential(
-            nn.Linear(512, 256),
-            nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(256, 2)
+            nn.Linear(512, 256), nn.ReLU(), nn.Dropout(0.5), nn.Linear(256, 2)
         )
 
     def forward(self, x):
@@ -60,597 +57,208 @@ class CNN_BiLSTM(nn.Module):
         lstm_out, _ = self.lstm(feats)
         return self.classifier(lstm_out[:, -1, :])
 
-
-# =========================================================
-# LOAD MODELS
-# =========================================================
-@st.cache_resource
-def load_models():
-    """Load YOLO face detector and trained deepfake detection model"""
-    
-    # Load face detection model - try different options
-    face_model = None
-    model_paths = [
-        r"/home/krish-sharma/Desktop/cyber Security/CyberSafe/yolov8n-face.pt",  # Face-specific model
-    ]
-    
-    for path in model_paths:
-        try:
-            if os.path.exists(path) or path in ["yolov8n.pt", "yolov8s.pt"]:
-                face_model = YOLO(path)
-                st.success(f"✅ Face detector loaded: {path}")
-                break
-        except Exception as e:
-            continue
-    
-    if face_model is None:
-        st.warning("⚠️ Using default YOLO model - face detection may be less accurate")
-        face_model = YOLO("yolov8n.pt")
-    
-    # Load trained deepfake model
-    model = CNN_BiLSTM().to(DEVICE)
-    
-    if os.path.exists(MODEL_PATH):
-        try:
-            model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
-            st.success(f"✅ Deepfake model loaded on {DEVICE.upper()}")
-        except Exception as e:
-            st.error(f"❌ Error loading model: {e}")
-            st.info("Please ensure the model file is not corrupted.")
-    else:
-        st.error(f"❌ Model not found at: {MODEL_PATH}")
-        st.info("Please update the MODEL_PATH variable with the correct path to your trained model.")
+# =========================
+# AI WORKER CLASS
+# =========================
+class DeepfakeDetector:
+    def __init__(self):
+        print(f"🚀 Loading AI on {DEVICE}...")
+        self.device = DEVICE
         
-    model.eval()
-    
-    return face_model, model
-
-
-# =========================================================
-# FACE DETECTION & EXTRACTION
-# =========================================================
-def extract_faces_from_frame(frame, face_model):
-    """Extract largest face from a single frame using YOLO"""
-    
-    results = face_model(frame, verbose=False, conf=0.3)[0]  # Lowered confidence threshold
-    
-    if len(results.boxes) == 0:
-        return None
-    
-    # Get largest face
-    boxes = results.boxes.xyxy.cpu().numpy()
-    areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-    
-    if len(areas) == 0:
-        return None
+        print("   • Loading YOLOv8-Face...")
+        self.face_model = YOLO(r"C:\Users\ASUS\Desktop\CyberSafe\CyberSafe\yolov8s-face-lindevs.onnx", task='detect') 
         
-    largest_idx = np.argmax(areas)
-    x1, y1, x2, y2 = map(int, boxes[largest_idx])
-    
-    # Safe crop with padding
-    h, w, _ = frame.shape
-    padding = 20  # Add padding around face
-    x1 = max(0, x1 - padding)
-    y1 = max(0, y1 - padding)
-    x2 = min(w, x2 + padding)
-    y2 = min(h, y2 + padding)
-    
-    face_crop = frame[y1:y2, x1:x2]
-    
-    if face_crop.size == 0:
-        return None
-    
-    return face_crop, (x1, y1, x2, y2)
+        print(f"   • Loading {MODEL_PATH}...")
+        self.model = CNN_BiLSTM().to(self.device)
+        try:
+            self.model.load_state_dict(torch.load(MODEL_PATH, map_location=self.device))
+            self.model.eval()
+            print("✅ Model loaded successfully.")
+        except FileNotFoundError:
+            print(f"❌ Error: Could not find {MODEL_PATH}")
+            exit()
 
+        self.transform = transforms.Compose([
+            transforms.Resize((INPUT_SIZE, INPUT_SIZE)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
 
-def preprocess_face(face_crop):
-    """Preprocess face for model input"""
-    
-    transform = transforms.Compose([
-        transforms.Resize((IMG_SIZE, IMG_SIZE)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
-    
-    # Convert BGR to RGB
-    face_rgb = cv2.cvtColor(face_crop, cv2.COLOR_BGR2RGB)
-    pil_face = Image.fromarray(face_rgb)
-    
-    return transform(pil_face)
+        self.frame_buffer = collections.deque(maxlen=SEQ_LENGTH)
+        self.running = True
+        self.input_queue = queue.Queue(maxsize=1)
+        
+        self.current_prob = 0.0
+        self.smoothed_prob = 0.0
+        self.current_label = "Scanning..."
+        self.current_box = None 
+        
+        self.thread = threading.Thread(target=self._inference_loop, daemon=True)
+        self.thread.start()
 
+    def process_frame(self, frame):
+        if not self.input_queue.full():
+            self.input_queue.put(frame)
 
-def process_video(video_path, face_model, progress_callback=None):
-    """Process entire video and extract face tensors"""
+    def _inference_loop(self):
+        while self.running:
+            try:
+                frame = self.input_queue.get(timeout=1)
+                
+                # 1. YOLO Detection
+                results = self.face_model(frame, verbose=False, conf=0.5, device='cpu')[0]
+
+                if len(results.boxes) > 0:
+                    boxes = results.boxes.xyxy.cpu().numpy()
+                    areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+                    largest_idx = np.argmax(areas)
+                    x1, y1, x2, y2 = map(int, boxes[largest_idx])
+
+                    self.current_box = (x1, y1, x2, y2)
+
+                    # 2. Crop
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    h, w, _ = frame.shape
+                    x1, y1 = max(0, x1), max(0, y1)
+                    x2, y2 = min(w, x2), min(h, y2)
+                    
+                    face_crop = frame_rgb[y1:y2, x1:x2]
+                    
+                    if face_crop.size > 0:
+                        pil_face = Image.fromarray(face_crop)
+                        face_tensor = self.transform(pil_face)
+                        self.frame_buffer.append(face_tensor)
+
+                        # 3. Inference
+                        if len(self.frame_buffer) == SEQ_LENGTH:
+                            input_tensor = torch.stack(list(self.frame_buffer)).unsqueeze(0).to(self.device)
+                            with torch.no_grad():
+                                out = self.model(input_tensor)
+                                new_prob = torch.softmax(out, dim=1)[0, 1].item()
+                            
+                            self.smoothed_prob = (EMA_ALPHA * new_prob) + ((1 - EMA_ALPHA) * self.smoothed_prob)
+
+                            if self.smoothed_prob > CONFIDENCE_THRESHOLD:
+                                self.current_label = "FAKE"
+                            else:
+                                self.current_label = "REAL"
+                        else:
+                            self.current_label = f"BUFFERING {len(self.frame_buffer)}/{SEQ_LENGTH}"
+                else:
+                    self.current_box = None
+
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"⚠️ Error: {e}")
+
+    def get_status(self):
+        return self.current_label, self.smoothed_prob, self.current_box
+
+    def stop(self):
+        self.running = False
+        self.thread.join()
+
+# =========================
+# MAIN LOOP
+# =========================
+def main():
+    detector = DeepfakeDetector()
     
-    cap = cv2.VideoCapture(video_path)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    
-    if total_frames < FRAMES:
-        cap.release()
-        return None, None
-    
-    # Uniformly sample FRAMES indices
-    indices = np.linspace(0, total_frames - 1, FRAMES).astype(int)
-    
-    face_tensors = []
-    face_boxes = []
-    
-    for i, idx in enumerate(indices):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+    print(f"🎥 Opening video: {VIDEO_PATH}")
+    cap = cv2.VideoCapture(VIDEO_PATH)
+
+    if not cap.isOpened():
+        print("❌ Error: Could not open video file. Check the path!")
+        return
+
+    all_probs = []
+    fake_frames = 0
+    total_analyzed = 0
+
+    while True:
         ret, frame = cap.read()
         
-        if not ret:
-            continue
+        # If video ends, break (or use cap.set(cv2.CAP_PROP_POS_FRAMES, 0) to loop)
+        if not ret: 
+            print("End of video.")
+            break
+
+        # Send frame to AI
+        detector.process_frame(frame)
+        label, prob, box = detector.get_status()
+
+        if label in ["FAKE", "REAL"]:
+            all_probs.append(prob)
+            total_analyzed += 1
+            if label == "FAKE":
+                fake_frames += 1
+
+        # Colors
+        if label == "FAKE": color = (0, 0, 255)      # Red
+        elif label == "REAL": color = (0, 255, 0)    # Green
+        else: color = (0, 255, 255)                  # Yellow
+
+        # Draw Box
+        if box is not None:
+            x1, y1, x2, y2 = box
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            cv2.rectangle(frame, (x1, y1-30), (x2, y1), color, -1)
+            text = f"{label} ({prob*100:.0f}%)" if label in ["REAL", "FAKE"] else label
+            cv2.putText(frame, text, (x1+5, y1-7), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,0), 2)
+
+        # Draw Dashboard
+        h, w, _ = frame.shape
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (0, 0), (w, 60), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
+
+        bar_width = 300
+        bar_x = 20
+        bar_y = 35
+        fill_width = int(bar_width * prob)
+        bar_color = (0, 255 - int(255*prob), int(255*prob)) 
         
-        # Extract face
-        result = extract_faces_from_frame(frame, face_model)
+        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + 15), (50, 50, 50), -1)
+        cv2.rectangle(frame, (bar_x, bar_y), (bar_x + fill_width, bar_y + 15), bar_color, -1)
         
-        if result is not None:
-            face_crop, box = result
-            face_tensor = preprocess_face(face_crop)
-            face_tensors.append(face_tensor)
-            face_boxes.append(box)
-        
-        if progress_callback:
-            progress_callback(i + 1, len(indices))
-    
+        cv2.putText(frame, "DEEPFAKE PROBABILITY:", (20, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
+        cv2.putText(frame, f"{prob*100:.1f}%", (bar_x + bar_width + 10, bar_y + 13), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+
+        cv2.imshow("Single Video Test", frame)
+
+        # Wait 30ms (approx 30fps) - Press 'q' to quit
+        if cv2.waitKey(30) & 0xFF == ord('q'):
+            break
+
+    detector.stop()
     cap.release()
-    
-    # Check if we have enough frames
-    if len(face_tensors) < FRAMES // 2:  # At least 8 frames
-        return None, None
-    
-    # Pad if necessary
-    if len(face_tensors) < FRAMES:
-        # Repeat last frame to fill
-        while len(face_tensors) < FRAMES:
-            face_tensors.append(face_tensors[-1])
-    
-    # Stack tensors: [FRAMES, 3, 224, 224]
-    video_tensor = torch.stack(face_tensors[:FRAMES])
-    
-    return video_tensor, face_boxes
+    cv2.destroyAllWindows()
 
+    # Calculate final output
+    print("\n" + "="*50)
+    print("📊 FINAL VIDEO VERDICT")
+    print("="*50)
 
-# =========================================================
-# INFERENCE
-# =========================================================
-def predict(video_tensor, model):
-    """Run inference on video tensor"""
-    
-    with torch.no_grad():
-        # Add batch dimension: [1, FRAMES, 3, 224, 224]
-        video_tensor = video_tensor.unsqueeze(0).to(DEVICE)
+    if total_analyzed > 0:
+        avg_prob = sum(all_probs) / len(all_probs)
+        fake_percentage = (fake_frames / total_analyzed) * 100
         
-        with torch.amp.autocast('cuda' if DEVICE == 'cuda' else 'cpu'):
-            outputs = model(video_tensor)
-            probabilities = torch.softmax(outputs, dim=1)
-            
-    fake_prob = probabilities[0][1].item()
-    real_prob = probabilities[0][0].item()
-    prediction = 1 if fake_prob > 0.5 else 0
-    
-    return prediction, real_prob, fake_prob
+        print(f"Frames Analyzed:   {total_analyzed}")
+        print(f"Fake Frames Found: {fake_frames} ({fake_percentage:.1f}%)")
+        print(f"Average Fake Prob: {avg_prob*100:.1f}%\n")
 
-
-# =========================================================
-# VISUALIZATION FUNCTIONS
-# =========================================================
-def create_gauge_chart(real_prob, fake_prob):
-    """Create a gauge chart for probability visualization"""
-    
-    fig = go.Figure(go.Indicator(
-        mode="gauge+number+delta",
-        value=fake_prob * 100,
-        title={"text": "Fake Probability (%)"},
-        delta={"reference": 50, "increasing": {"color": "red"}},
-        gauge={
-            "axis": {"range": [0, 100], "tickwidth": 1},
-            "bar": {"color": "darkred" if fake_prob > 0.5 else "darkgreen"},
-            "steps": [
-                {"range": [0, 50], "color": "lightgreen"},
-                {"range": [50, 100], "color": "lightcoral"}
-            ],
-            "threshold": {
-                "line": {"color": "red", "width": 4},
-                "thickness": 0.75,
-                "value": 50
-            }
-        }
-    ))
-    
-    fig.update_layout(height=300)
-    return fig
-
-
-def create_probability_bar(real_prob, fake_prob):
-    """Create a bar chart for probability comparison"""
-    
-    fig = go.Figure(data=[
-        go.Bar(name='Real', x=['Probability'], y=[real_prob * 100], 
-               marker_color='green', text=f'{real_prob*100:.1f}%', textposition='auto'),
-        go.Bar(name='Fake', x=['Probability'], y=[fake_prob * 100], 
-               marker_color='red', text=f'{fake_prob*100:.1f}%', textposition='auto')
-    ])
-    
-    fig.update_layout(
-        title="Detection Confidence",
-        yaxis_title="Confidence (%)",
-        yaxis_range=[0, 100],
-        height=400,
-        showlegend=True
-    )
-    
-    return fig
-
-
-def create_confidence_meter(real_prob, fake_prob):
-    """Create a confidence meter using plotly"""
-    
-    fig = go.Figure()
-    
-    fig.add_trace(go.Scatter(
-        x=[0, 0.5, 1],
-        y=[0, 0.5, 0],
-        mode='lines',
-        fill='tozeroy',
-        fillcolor='rgba(0,255,0,0.2)',
-        line=dict(color='green', width=2),
-        name='Real Zone'
-    ))
-    
-    fig.add_trace(go.Scatter(
-        x=[0.5, 0.5, 1],
-        y=[0.5, 0, 0],
-        mode='lines',
-        fill='tozeroy',
-        fillcolor='rgba(255,0,0,0.2)',
-        line=dict(color='red', width=2),
-        name='Fake Zone'
-    ))
-    
-    # Add indicator line
-    fig.add_shape(
-        type='line',
-        x0=fake_prob, x1=fake_prob,
-        y0=0, y1=0.5,
-        line=dict(color='blue', width=4, dash='dash')
-    )
-    
-    fig.add_annotation(
-        x=fake_prob, y=0.55,
-        text=f"Fake Score: {fake_prob*100:.1f}%",
-        showarrow=True,
-        arrowhead=2
-    )
-    
-    fig.update_layout(
-        title="Decision Boundary",
-        xaxis_title="Fake Probability",
-        yaxis_title="Confidence",
-        xaxis_range=[0, 1],
-        yaxis_range=[0, 0.6],
-        height=300,
-        showlegend=True
-    )
-    
-    return fig
-
-
-# =========================================================
-# STREAMLIT UI
-# =========================================================
-st.set_page_config(
-    page_title="Deepfake Detection System",
-    page_icon="🎭",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Custom CSS
-st.markdown("""
-<style>
-    .stButton > button {
-        width: 100%;
-        background-color: #4CAF50;
-        color: white;
-        font-size: 18px;
-        padding: 10px;
-    }
-    .main-header {
-        text-align: center;
-        padding: 20px;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        border-radius: 10px;
-        color: white;
-        margin-bottom: 30px;
-    }
-    .result-card {
-        border-radius: 10px;
-        padding: 20px;
-        text-align: center;
-        margin: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    .real-card {
-        background-color: #d4edda;
-        border: 2px solid #28a745;
-    }
-    .fake-card {
-        background-color: #f8d7da;
-        border: 2px solid #dc3545;
-    }
-    .info-text {
-        font-size: 14px;
-        color: #666;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Header
-st.markdown("""
-<div class="main-header">
-    <h1>🎭 AI-Powered Deepfake Detection System</h1>
-    <p>CNN-BiLSTM Architecture | Real-time Video Analysis</p>
-</div>
-""", unsafe_allow_html=True)
-
-# Sidebar
-with st.sidebar:
-    st.markdown("## 📋 About")
-    st.info("""
-    This system uses a **CNN-BiLSTM** deep learning model to detect deepfake videos.
-    
-    **Model Details:**
-    - Backbone: EfficientNet-B0
-    - Sequence: BiLSTM (2 layers, 256 hidden)
-    - Input: 16 frames per video
-    - Training: Celeb-DF Dataset
-    
-    **How it works:**
-    1. Extracts 16 frames from the video
-    2. Detects faces using YOLOv8
-    3. Processes through CNN-BiLSTM
-    4. Outputs probability score
-    """)
-    
-    st.markdown("---")
-    st.markdown("### ⚙️ Settings")
-    confidence_threshold = st.slider("Confidence Threshold", 0.5, 0.95, 0.5, 0.05)
-    
-    st.markdown("---")
-    st.markdown("### 📊 Performance Metrics")
-    st.metric("Model Accuracy", "99.70%")
-    st.metric("AUC-ROC", "0.9994")
-    st.metric("F1-Score", "0.997")
-
-# Main content
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    st.markdown("## 📤 Upload Video")
-    uploaded_file = st.file_uploader(
-        "Choose a video file...",
-        type=['mp4', 'avi', 'mov', 'mkv', 'webm'],
-        help="Supported formats: MP4, AVI, MOV, MKV, WEBM"
-    )
-
-with col2:
-    st.markdown("## 📝 Instructions")
-    st.markdown("""
-    1. Click 'Browse files' to upload a video
-    2. Wait for processing (may take 10-30 seconds)
-    3. View the detection results
-    4. Check confidence scores
-    
-    **Note:** Videos should contain clear faces for accurate detection.
-    """)
-
-# Process uploaded video
-if uploaded_file is not None:
-    # Save uploaded file to temporary file
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
-        tmp_file.write(uploaded_file.read())
-        video_path = tmp_file.name
-    
-    # Display video
-    st.video(video_path)
-    
-    # Load models
-    with st.spinner("🔄 Loading AI Models..."):
-        face_model, deepfake_model = load_models()
-    
-    # Progress bar
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    def update_progress(current, total):
-        progress = current / total
-        progress_bar.progress(progress)
-        status_text.text(f"Processing frames: {current}/{total}")
-    
-    # Process video
-    st.markdown("## 🔍 Analyzing Video...")
-    
-    try:
-        with st.spinner("🎬 Extracting faces and analyzing frames..."):
-            video_tensor, frame_metadata = process_video(
-                video_path, face_model, update_progress
-            )
-        
-        progress_bar.progress(100)
-        status_text.text("✅ Processing complete!")
-        
-        if video_tensor is None:
-            st.error("❌ Could not extract enough faces from the video. Please ensure the video contains clear faces and is at least 16 frames long.")
+        # Thresholds can be adjusted (e.g., if > 50% average probability = FAKE)
+        if avg_prob > 0.5:
+            print("🚨 VERDICT: FAKE / DEEPFAKE DETECTED 🚨")
+            print(f"Confidence: {avg_prob*100:.1f}%")
         else:
-            # Run inference
-            with st.spinner("🧠 Running deepfake detection..."):
-                prediction, real_prob, fake_prob = predict(video_tensor, deepfake_model)
-            
-            # Display results
-            st.markdown("## 📊 Detection Results")
-            
-            # Result cards
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                if prediction == 0:
-                    st.markdown(f"""
-                    <div class="result-card real-card">
-                        <h2>✅ REAL</h2>
-                        <p>The video appears to be AUTHENTIC</p>
-                        <p style="font-size: 24px;">Confidence: {real_prob*100:.1f}%</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                else:
-                    st.markdown(f"""
-                    <div class="result-card fake-card">
-                        <h2>⚠️ FAKE</h2>
-                        <p>The video appears to be MANIPULATED</p>
-                        <p style="font-size: 24px;">Confidence: {fake_prob*100:.1f}%</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-            
-            with col2:
-                st.metric("Real Probability", f"{real_prob*100:.1f}%")
-                st.metric("Fake Probability", f"{fake_prob*100:.1f}%")
-            
-            with col3:
-                if fake_prob > confidence_threshold:
-                    st.warning("⚠️ High confidence: FAKE detected!")
-                elif real_prob > confidence_threshold:
-                    st.success("✅ High confidence: REAL detected!")
-                else:
-                    st.info("ℹ️ Low confidence - results are uncertain")
-            
-            # Visualization section
-            st.markdown("---")
-            st.markdown("## 📈 Visualization")
-            
-            viz_col1, viz_col2 = st.columns(2)
-            
-            with viz_col1:
-                # Gauge chart
-                fig_gauge = create_gauge_chart(real_prob, fake_prob)
-                st.plotly_chart(fig_gauge, use_container_width=True)
-            
-            with viz_col2:
-                # Probability bar
-                fig_bar = create_probability_bar(real_prob, fake_prob)
-                st.plotly_chart(fig_bar, use_container_width=True)
-            
-            # Confidence meter
-            fig_meter = create_confidence_meter(real_prob, fake_prob)
-            st.plotly_chart(fig_meter, use_container_width=True)
-            
-            # Analysis summary
-            st.markdown("## 📋 Analysis Summary")
-            
-            summary_col1, summary_col2 = st.columns(2)
-            
-            with summary_col1:
-                st.markdown("**Video Information:**")
-                st.markdown(f"- File name: `{uploaded_file.name}`")
-                st.markdown(f"- File size: `{uploaded_file.size / 1024 / 1024:.2f} MB`")
-                st.markdown(f"- Frames analyzed: `{FRAMES}`")
-            
-            with summary_col2:
-                st.markdown("**Detection Details:**")
-                st.markdown(f"- Model: `CNN-BiLSTM (EfficientNet-B0)`")
-                st.markdown(f"- Face Detector: `YOLOv8`")
-                st.markdown(f"- Device: `{DEVICE.upper()}`")
-            
-            # Confidence explanation
-            st.markdown("---")
-            st.markdown("### 💡 Understanding the Results")
-            
-            if prediction == 0:
-                st.info("""
-                **The video is classified as REAL**  
-                The model detected consistent facial features and natural motion patterns 
-                typical of authentic videos. The confidence score indicates the model's 
-                certainty in this classification.
-                """)
-            else:
-                st.warning("""
-                **The video is classified as FAKE**  
-                The model detected inconsistencies in facial features, unnatural motion 
-                patterns, or other artifacts commonly found in deepfake videos. The 
-                confidence score indicates the model's certainty in this classification.
-                """)
-            
-    except Exception as e:
-        st.error(f"❌ An error occurred during processing: {str(e)}")
-        st.exception(e)
-    
-    finally:
-        # Clean up temporary file
-        try:
-            os.unlink(video_path)
-        except:
-            pass
+            print("✅ VERDICT: REAL / HUMAN VERIFIED ✅")
+            print(f"Confidence: {(1-avg_prob)*100:.1f}%")
+    else:
+        print("⚠️ No valid frames were analyzed. No face detected?")
+    print("="*50 + "\n")
 
-else:
-    # Display placeholder when no video is uploaded
-    st.markdown("""
-    <div style="text-align: center; padding: 50px; background-color: #f0f2f6; border-radius: 10px;">
-        <h3>🎬 Ready to Detect Deepfakes</h3>
-        <p>Upload a video file using the button above to begin analysis</p>
-        <p class="info-text">Supported formats: MP4, AVI, MOV, MKV, WEBM</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Sample metrics
-    st.markdown("## 📊 Model Performance on Test Set")
-    
-    metrics_col1, metrics_col2, metrics_col3, metrics_col4 = st.columns(4)
-    
-    with metrics_col1:
-        st.metric("Accuracy", "99.70%", "Excellent")
-    with metrics_col2:
-        st.metric("Precision", "99.40%", "Excellent")
-    with metrics_col3:
-        st.metric("Recall", "100.00%", "Perfect")
-    with metrics_col4:
-        st.metric("F1-Score", "99.70%", "Excellent")
-    
-    st.markdown("---")
-    st.markdown("### 🧠 Model Architecture")
-    
-    arch_col1, arch_col2 = st.columns(2)
-    
-    with arch_col1:
-        st.markdown("""
-        **CNN Backbone:** EfficientNet-B0
-        - 16 frames per video
-        - 224x224 input resolution
-        - ImageNet normalization
-        
-        **Feature Extraction:**
-        - AdaptiveAvgPool2d(1)
-        - 1280 feature dimensions
-        """)
-    
-    with arch_col2:
-        st.markdown("""
-        **BiLSTM Layer:**
-        - 2 layers
-        - 256 hidden units
-        - Bidirectional (512 output)
-        - Dropout: 0.3
-        
-        **Classifier:**
-        - Linear(512 → 256) + ReLU
-        - Dropout(0.5)
-        - Linear(256 → 2)
-        """)
-
-# Footer
-st.markdown("---")
-st.markdown("""
-<div style="text-align: center; color: #666; padding: 20px;">
-    <p>🔬 Deepfake Detection System | CNN-BiLSTM Architecture | Trained on Celeb-DF Dataset</p>
-    <p class="info-text">For research and educational purposes only. Results should be interpreted with caution.</p>
-</div>
-""", unsafe_allow_html=True)
+if __name__ == "__main__":
+    main()

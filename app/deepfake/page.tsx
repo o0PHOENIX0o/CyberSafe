@@ -22,12 +22,16 @@ import {
   Pause,
 } from 'lucide-react'
 
-const BACKEND_URL = 'http://localhost:8000'
+const BACKEND_URL = 'http://127.0.0.1:8000'
 
 interface DetectionResult {
   label: string
   score?: number
   confidence?: number
+  average_score?: number
+  fake_percentage?: number
+  total_analyzed_frames?: number
+  fake_frames?: number
 }
 
 // ─── Circular Confidence Meter ───────────────────────────────────────────────
@@ -59,7 +63,7 @@ function CircularMeter({ score, isFake }: { score: number; isFake: boolean }) {
 // ─── Result Card ─────────────────────────────────────────────────────────────
 function ResultCard({ result, type }: { result: DetectionResult; type: 'audio' | 'video' }) {
   const isFake = result.label.toUpperCase().includes('FAKE') || result.label.toUpperCase().includes('SYNTHETIC')
-  const score = type === 'audio' ? (result.confidence ?? 0) * 100 : (result.score ?? 0) * 100
+  const score = (result.confidence ?? result.score ?? 0) * 100
 
   return (
     <div className={cn(
@@ -91,17 +95,40 @@ function ResultCard({ result, type }: { result: DetectionResult; type: 'audio' |
         </div>
       </div>
 
-      <div className="space-y-2">
-        <div className="flex justify-between text-xs text-muted-foreground">
-          <span>Detection Confidence</span>
-          <span className="font-mono font-semibold">{Math.round(score)}%</span>
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>Detection Confidence</span>
+            <span className="font-mono font-semibold">{Math.round(score)}%</span>
+          </div>
+          <div className="h-2 rounded-full bg-muted overflow-hidden">
+            <div
+              className={cn('h-full rounded-full transition-all duration-1000', isFake ? 'bg-gradient-to-r from-orange-500 to-red-500' : 'bg-gradient-to-r from-emerald-400 to-green-500')}
+              style={{ width: `${Math.round(score)}%` }}
+            />
+          </div>
         </div>
-        <div className="h-2 rounded-full bg-muted overflow-hidden">
-          <div
-            className={cn('h-full rounded-full transition-all duration-1000', isFake ? 'bg-gradient-to-r from-orange-500 to-red-500' : 'bg-gradient-to-r from-emerald-400 to-green-500')}
-            style={{ width: `${Math.round(score)}%` }}
-          />
-        </div>
+
+        {type === 'video' && result.total_analyzed_frames !== undefined && (
+          <div className="grid grid-cols-3 gap-2 mt-4 p-4 bg-background/40 backdrop-blur-sm rounded-xl border border-border">
+            <div className="flex flex-col items-center justify-center p-2 rounded-lg bg-muted/30">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Frames Analyzed</span>
+              <span className="font-mono text-lg font-bold text-foreground">{result.total_analyzed_frames}</span>
+            </div>
+            <div className="flex flex-col items-center justify-center p-2 rounded-lg bg-muted/30">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Fake Frames</span>
+              <span className={cn("font-mono text-lg font-bold", result.fake_frames && result.fake_frames > 0 ? "text-red-400" : "text-green-400")}>
+                {result.fake_frames} <span className="text-xs font-normal text-muted-foreground">({result.fake_percentage}%)</span>
+              </span>
+            </div>
+            <div className="flex flex-col items-center justify-center p-2 rounded-lg bg-muted/30">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Avg Fake Prob</span>
+              <span className={cn("font-mono text-lg font-bold", isFake ? "text-red-400" : "text-green-400")}>
+                {Math.round((result.average_score ?? 0) * 100)}%
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex gap-2 p-3 bg-muted/30 rounded-lg border border-border text-xs text-muted-foreground">
@@ -322,6 +349,8 @@ export default function DeepfakePage() {
   const [videoResult, setVideoResult] = useState<DetectionResult | null>(null)
   const [videoLoading, setVideoLoading] = useState(false)
   const [videoError, setVideoError] = useState<string | null>(null)
+  const [videoProgress, setVideoProgress] = useState(0)
+  const [videoStage, setVideoStage] = useState('')
 
   const handleAudioScan = async () => {
     if (!audioFile) return
@@ -333,7 +362,14 @@ export default function DeepfakePage() {
       form.append('file', audioFile)
       const res = await fetch(`${BACKEND_URL}/audio`, { method: 'POST', body: form })
       if (!res.ok) throw new Error(`Server error: ${res.status}`)
-      setAudioResult(await res.json())
+      
+      const data = await res.json()
+      
+      setAudioResult({
+         label: data.label,
+         confidence: data.confidence,
+         score: data.score
+      })
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error'
       setAudioError(`Failed to connect to detection backend. Make sure the backend server is running on port 8000. (${message})`)
@@ -347,12 +383,25 @@ export default function DeepfakePage() {
     setVideoLoading(true)
     setVideoError(null)
     setVideoResult(null)
+    setVideoProgress(0)
+    setVideoStage('')
     try {
       const form = new FormData()
       form.append('file', videoFile)
       const res = await fetch(`${BACKEND_URL}/video`, { method: 'POST', body: form })
       if (!res.ok) throw new Error(`Server error: ${res.status}`)
-      setVideoResult(await res.json())
+      
+      const data = await res.json()
+      
+      setVideoResult({
+          label: data.label,
+          confidence: data.confidence,
+          average_score: data.score,
+          fake_percentage: data.details?.fake_percentage,
+          total_analyzed_frames: data.details?.frames_analyzed,
+          fake_frames: data.details?.fake_frames
+      })
+      setVideoProgress(100)
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error'
       setVideoError(`Failed to connect to detection backend. Make sure the backend server is running on port 8000. (${message})`)
@@ -515,9 +564,15 @@ export default function DeepfakePage() {
                 {videoLoading && (
                   <div className="space-y-2 text-sm text-muted-foreground">
                     <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                      <div className="h-full bg-gradient-to-r from-pink-500 to-violet-500 rounded-full animate-pulse w-2/3" />
+                      <div 
+                        className={cn(
+                           "h-full bg-gradient-to-r from-pink-500 to-violet-500 rounded-full transition-all duration-500",
+                           videoProgress === 0 ? "animate-pulse w-2/3" : ""
+                        )}
+                        style={videoProgress > 0 ? { width: `${videoProgress}%` } : {}}
+                      />
                     </div>
-                    <p className="text-center text-xs">Extracting faces → running through CNN-BiLSTM model...</p>
+                    <p className="text-center text-xs">{videoStage || 'Extracting faces → running through CNN-BiLSTM model...'}</p>
                   </div>
                 )}
               </Card>

@@ -29,14 +29,14 @@ app = FastAPI(title="Deepfake Detection API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000","http://localhost:3000/deepfake"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Audio Model Configuration
-KERAS_MODEL_PATH = r"/home/krish-sharma/Desktop/cyber Security/CyberSafe/ALL MODELS/wavlm_classifier_v2.keras"
+KERAS_MODEL_PATH = r"C:\Users\ASUS\Desktop\CyberSafe\CyberSafe\ALL MODELS\wavlm_classifier_v2.keras"
 WAVLM_MODEL_NAME = "microsoft/wavlm-base-plus"
 SAMPLE_RATE = 16000
 MAX_DURATION = 5
@@ -86,7 +86,7 @@ def predict_audio(file_bytes):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Video Model Configuration
-VIDEO_MODEL_PATH = r"/home/krish-sharma/Desktop/cyber Security/CyberSafe/ALL MODELS/best_celebdf_model_Krish.pt"
+VIDEO_MODEL_PATH = r"C:\Users\ASUS\Desktop\CyberSafe\CyberSafe\ALL MODELS\best_celebdf_model_Krish.pt"
 VIDEO_INPUT_SIZE = 224
 VIDEO_SEQ_LENGTH = 16        
 VIDEO_CONFIDENCE_THRESHOLD = 0.60
@@ -121,7 +121,7 @@ class CNN_BiLSTM_Video(nn.Module):
 class DeepfakeVideoDetector:
     def __init__(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.face_model = YOLO(r"/home/krish-sharma/Desktop/cyber Security/CyberSafe/yolov8n-face.pt", task='detect') 
+        self.face_model = YOLO(r"C:\Users\ASUS\Desktop\CyberSafe\CyberSafe\yolov8n-face.pt", task='detect') 
         self.model = CNN_BiLSTM_Video().to(self.device)
         self.model.load_state_dict(torch.load(VIDEO_MODEL_PATH, map_location=self.device))
         self.model.eval()
@@ -206,6 +206,19 @@ class DeepfakeVideoDetector:
 video_detector = None
 
 # API Endpoints
+@app.post("/analyze")
+async def analyze(file: UploadFile = File(...)):
+    filename = file.filename.lower()
+
+    if filename.endswith(('.wav', '.mp3', '.flac', '.m4a', '.ogg')):
+        contents = await file.read()
+        return JSONResponse(content=predict_audio(contents))
+
+    elif filename.endswith(('.mp4', '.avi', '.mov', '.mkv', '.webm')):
+        return await predict_video_endpoint(file)
+
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported file format")
 @app.post("/audio")
 async def predict_audio_endpoint(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(('.wav', '.mp3', '.flac', '.m4a', '.ogg')):
