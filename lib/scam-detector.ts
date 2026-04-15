@@ -90,12 +90,12 @@ const urlPatterns = {
   },
   legitimate_lookalikes: {
     patterns: [
-      /paypa[l1]\..*(?!paypal\.com)/i,
-      /amaz[o0]n\..*(?!amazon\.com)/i,
-      /([a-z0-9-]*)?paypal[a-z0-9-]*\.(?!paypal\.com)/i,
-      /([a-z0-9-]*)?amazon[a-z0-9-]*\.(?!amazon\.com)/i,
+      /paypa[l1]\..*/i,
+      /amaz[o0]n\..*/i,
+      /([a-z0-9-]*)?paypal[a-z0-9-]*\./i,
+      /([a-z0-9-]*)?amazon[a-z0-9-]*\./i,
     ],
-    weight: 30,
+    weight: 35,
     severity: 'critical' as const,
   },
 }
@@ -233,6 +233,19 @@ export function analyzeUrl(url: string): { riskScore: number; patterns: Detected
   try {
     const urlObj = new URL(url)
     const domain = urlObj.hostname.toLowerCase()
+    
+    // Check for IDN/Punycode homoglyph attacks
+    // Flags domains with non-ASCII characters or the xn-- prefix
+    const isIdn = /^xn--/.test(domain) || /[^\x00-\x7F]/.test(domain);
+    if (isIdn) {
+      patterns.push({
+        name: 'Homoglyph/IDN Attack',
+        confidence: 95,
+        description: `Domain uses non-standard characters to impersonate legitimate services: ${domain}`,
+        severity: 'critical',
+      })
+      riskScore += 40
+    }
 
     // Check for suspicious URL shorteners
     for (const pattern of urlPatterns.suspicious.patterns) {
@@ -249,16 +262,21 @@ export function analyzeUrl(url: string): { riskScore: number; patterns: Detected
     }
 
     // Check for lookalike domains
-    for (const pattern of urlPatterns.legitimate_lookalikes.patterns) {
-      if (pattern.test(url)) {
-        patterns.push({
-          name: 'Lookalike Domain',
-          confidence: 95,
-          description: `Domain resembles legitimate service but is different: ${domain}`,
-          severity: urlPatterns.legitimate_lookalikes.severity,
-        })
-        riskScore += urlPatterns.legitimate_lookalikes.weight
-        break
+    const legitDomains = ['paypal.com', 'amazon.com', 'google.com', 'microsoft.com', 'apple.com']
+    const isExactlyLegit = legitDomains.includes(domain)
+
+    if (!isExactlyLegit) {
+      for (const pattern of urlPatterns.legitimate_lookalikes.patterns) {
+        if (pattern.test(domain)) {
+          patterns.push({
+            name: 'Lookalike Domain',
+            confidence: 95,
+            description: `Domain resembles a legitimate service but is unauthorized: ${domain}`,
+            severity: urlPatterns.legitimate_lookalikes.severity,
+          })
+          riskScore += urlPatterns.legitimate_lookalikes.weight
+          break
+        }
       }
     }
 

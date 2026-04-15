@@ -95,11 +95,28 @@
   }
 }
 
-  // Ensure the page has had time to construct the DOM
+  // Initial scan
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', scanLinks);
   } else {
-    // Wait a tiny bit just to ensure React/Vue frameworks have hydrated
-    setTimeout(scanLinks, 1000);
+    setTimeout(scanLinks, 500);
   }
+
+  // Set up MutationObserver to detect dynamically added links (console scripts, React updates)
+  let scanTimeout = null;
+  const observer = new MutationObserver((mutations) => {
+    // Check if any added nodes are links or contain links
+    const hasNewLinks = mutations.some(m => 
+      Array.from(m.addedNodes).some(node => 
+        (node.nodeName === 'A') || (node.querySelectorAll && node.querySelectorAll('a').length > 0)
+      )
+    );
+
+    if (hasNewLinks) {
+      if (scanTimeout) clearTimeout(scanTimeout);
+      scanTimeout = setTimeout(scanLinks, 800);
+    }
+  });
+
+  observer.observe(document.body, { childList: true, subtree: true });
 })();

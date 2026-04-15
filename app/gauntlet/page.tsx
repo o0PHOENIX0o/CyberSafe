@@ -35,7 +35,7 @@ export default function GauntletPage() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [isGameOver, setIsGameOver] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
-  const [timeLeft, setTimeLeft] = useState(3)
+  const [timeLeft, setTimeLeft] = useState(10)
   const [score, setScore] = useState(0)
   const [results, setResults] = useState<{scenario: Scenario, userChoice: boolean, correct: boolean}[]>([])
   
@@ -50,9 +50,9 @@ export default function GauntletPage() {
 
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
-        if (prev <= 1) {
+        if (prev <= 0.1) {
           handleChoice(null) // Time ran out
-          return 3
+          return 10
         }
         return prev - 0.1
       })
@@ -76,7 +76,7 @@ export default function GauntletPage() {
     // Go next
     if (currentIndex < gauntletScenarios.length - 1) {
       setCurrentIndex(i => i + 1)
-      setTimeLeft(3)
+      setTimeLeft(10)
     } else {
       endGame()
     }
@@ -95,7 +95,7 @@ export default function GauntletPage() {
     setResults([])
     setScore(0)
     setCurrentIndex(0)
-    setTimeLeft(3)
+    setTimeLeft(10)
     setIsGameOver(false)
     setIsPlaying(true)
   }
@@ -130,7 +130,7 @@ export default function GauntletPage() {
               <div>
                 <h1 className="text-4xl font-bold text-white mb-2 tracking-tight">The Phishing Gauntlet</h1>
                 <p className="text-emerald-400/80 text-lg">
-                  Test your real-world reflexes. You have <span className="font-bold text-white">3 seconds</span> per message to decide: <span className="font-bold text-emerald-400">SAFE</span> or <span className="font-bold text-rose-500">SCAM</span>.
+                  Test your real-world reflexes. You have <span className="font-bold text-white">10 seconds</span> per message to decide: <span className="font-bold text-emerald-400">SAFE</span> or <span className="font-bold text-rose-500">SCAM</span>.
                 </p>
                 <div className="flex items-center justify-center gap-6 mt-8 text-sm text-gray-400 font-mono">
                   <div className="flex items-center gap-3 bg-black/40 px-4 py-2 rounded-lg border border-white/5">
@@ -153,9 +153,9 @@ export default function GauntletPage() {
               {/* Progress bar timer */}
               <div 
                 className={cn("absolute top-0 left-0 h-1.5 transition-all duration-100 ease-linear shadow-[0_0_10px_currentColor]", 
-                  timeLeft > 1.5 ? "bg-emerald-500 text-emerald-500" : timeLeft > 0.5 ? "bg-amber-500 text-amber-500" : "bg-rose-500 text-rose-500"
+                  timeLeft > 5 ? "bg-emerald-500 text-emerald-500" : timeLeft > 2 ? "bg-amber-500 text-amber-500" : "bg-rose-500 text-rose-500"
                 )} 
-                style={{ width: `${(timeLeft / 3) * 100}%` }}
+                style={{ width: `${(timeLeft / 10) * 100}%` }}
               />
               
               <div className="flex justify-between items-center text-sm font-semibold text-emerald-500/70 uppercase tracking-widest font-mono">
