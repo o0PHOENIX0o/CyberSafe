@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Sidebar } from '@/components/sidebar'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { analyzeText, analyzeUrl, analyzeEmail, type ScamAnalysisResult } from '@/lib/scam-detector'
+import { analyzeText, analyzeEmail, type ScamAnalysisResult } from '@/lib/scam-detector'
 import { Shield, CheckCircle, AlertTriangle, AlertCircle, Copy, Zap } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
@@ -20,27 +20,82 @@ export default function ScannerPage() {
     if (!input.trim()) return
 
     setLoading(true)
-    // Simulate processing delay
-    await new Promise(resolve => setTimeout(resolve, 500))
 
-    let analysisResult: ScamAnalysisResult
+    try {
+      let analysisResult: ScamAnalysisResult
 
-    switch (activeTab) {
-      case 'email':
-        analysisResult = analyzeEmail(input)
-        break
-      case 'url':
-        analysisResult = analyzeUrl(input).riskScore >= 0
-          ? { ...analyzeUrl(input), riskLevel: 'safe', explanation: '', recommendations: [] }
-          : { riskScore: 0, riskLevel: 'safe', patterns: [], explanation: 'Valid URL', recommendations: [] }
-        break
-      case 'text':
-      default:
-        analysisResult = analyzeText(input)
+      if (activeTab === 'url') {
+        const response = await fetch('http://localhost:8000/api/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ urls: [input] }),
+        })
+
+        if (!response.ok) {
+          throw new Error(`Backend scan failed with status ${response.status}`)
+        }
+
+        const data = await response.json()
+        if (!data.success || !Array.isArray(data.results) || data.results.length === 0) {
+          throw new Error('Backend scan returned no results')
+        }
+
+        const scanResult = data.results[0]
+        const riskScore = Math.min(100, Math.max(0, Math.round(scanResult.score ?? 0)))
+        let riskLevel: ScamAnalysisResult['riskLevel'] = 'safe'
+        if (riskScore >= 80) riskLevel = 'critical'
+        else if (riskScore >= 60) riskLevel = 'high'
+        else if (riskScore >= 40) riskLevel = 'medium'
+        else if (riskScore >= 20) riskLevel = 'low'
+
+        const patterns = Array.isArray(scanResult.patterns)
+          ? scanResult.patterns.map((pattern: string) => ({
+              name: pattern,
+              confidence: scanResult.isSuspicious ? 80 : 40,
+              description: pattern,
+              severity: scanResult.isSuspicious ? 'high' : 'low',
+            }))
+          : []
+
+        analysisResult = {
+          riskScore,
+          riskLevel,
+          patterns,
+          explanation: scanResult.isSuspicious
+            ? 'Backend URL scan detected suspicious characteristics in the submitted URL.'
+            : 'Backend URL scan did not find suspicious patterns in the submitted URL.',
+          recommendations: scanResult.isSuspicious
+            ? [
+                'Do not visit this URL or click any links from it.',
+                'Verify the sender/domain before interacting.',
+                'Report the URL to your security team or browser provider.',
+              ]
+            : ['The URL appears safe based on backend detection. Continue with caution.'],
+        }
+      } else {
+        switch (activeTab) {
+          case 'email':
+            analysisResult = analyzeEmail(input)
+            break
+          case 'text':
+          default:
+            analysisResult = analyzeText(input)
+        }
+      }
+
+      setResult(analysisResult)
+    } catch (error) {
+      console.error(error)
+      setResult({
+        riskScore: 0,
+        riskLevel: 'safe',
+        patterns: [],
+        explanation: 'Unable to scan the URL. Please try again later.',
+        recommendations: ['Check your internet connection and try again.'],
+      })
+    } finally {
+      setLoading(false)
     }
-
-    setResult(analysisResult)
-    setLoading(false)
   }
 
   const getRiskColor = (riskLevel: string) => {

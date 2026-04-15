@@ -34,6 +34,8 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
+from urllib.parse import urlparse
+
 from pydantic import BaseModel, Field
 
 
@@ -291,76 +293,178 @@ class ExportRequest(BaseModel):
 
 video_detector = None
 
-# URL Scanning Heuristics
-def scan_urls(urls):
-    """Scan URLs for phishing/scam patterns"""
-    phishing_patterns = [
-        'phishing', 'fake', 'scam', 'malware', 'suspicious', 'stealer', 'harvester',
-        'credential', 'password', 'login', 'verify', 'confirm', 'update', 'urgent',
-        'act-now', 'bitcoin', 'wallet', 'paypal', 'amazon', 'bank', 'admin', 'panel',
-        'suspicious', 'alert', 'warning', 'secure', 'verify-account'
-    ]
+# # URL Scanning Heuristics
+# def scan_urls(urls):
+#     """Scan URLs for phishing/scam patterns"""
+#     phishing_patterns = [
+#         'phishing', 'fake', 'scam', 'malware', 'suspicious', 'stealer', 'harvester',
+#         'credential', 'password', 'login', 'verify', 'confirm', 'update', 'urgent',
+#         'act-now', 'bitcoin', 'wallet', 'paypal', 'amazon', 'bank', 'admin', 'panel',
+#         'suspicious', 'alert', 'warning', 'secure', 'verify-account'
+#     ]
     
+#     results = []
+#     for url in urls:
+#         try:
+#             url_lower = url.lower()
+#             score = 0
+#             patterns_found = []
+            
+#             # Check for suspicious patterns
+#             for pattern in phishing_patterns:
+#                 if pattern in url_lower:
+#                     score += 15
+#                     patterns_found.append(pattern)
+            
+#             # Check for typosquatting common domains
+#             typo_domains = {
+#                 'paypa1': 'PayPal typosquatting',
+#                 'amaz0n': 'Amazon typosquatting',
+#                 'goog1e': 'Google typosquatting',
+#                 'faceb00k': 'Facebook typosquatting',
+#             }
+            
+#             for typo, reason in typo_domains.items():
+#                 if typo in url_lower:
+#                     score += 20
+#                     patterns_found.append(reason)
+            
+#             # Check for suspicious TLDs
+#             suspicious_tlds = ['.tk', '.ml', '.ga', '.cf']
+#             for tld in suspicious_tlds:
+#                 if url.endswith(tld):
+#                     score += 10
+#                     patterns_found.append(f'Suspicious TLD: {tld}')
+            
+#             # Check for IP addresses instead of domains
+#             if re.match(r'http[s]?://\d+\.\d+\.\d+\.\d+', url):
+#                 score += 25
+#                 patterns_found.append('IP address used instead of domain')
+            
+#             # Fake domains with common patterns
+#             if any(x in url_lower for x in ['.fake', '.scam', '.suspicious', '.test']):
+#                 score += 30
+#                 patterns_found.append('Clearly fake/test domain')
+            
+#             # Cap score at 100
+#             score = min(score, 100)
+            
+#             results.append({
+#                 'url': url,
+#                 'isSuspicious': score >= 50,
+#                 'score': score,
+#                 'patterns': patterns_found
+#             })
+#         except Exception as e:
+#             results.append({
+#                 'url': url,
+#                 'isSuspicious': False,
+#                 'score': 0,
+#                 'patterns': [f'Error scanning: {str(e)}']
+#             })
+    
+#     return results
+
+
+
+_PHISHING_KEYWORDS = frozenset([
+    'phishing', 'fake', 'scam', 'malware', 'suspicious', 'stealer', 'harvester',
+    'credential', 'password', 'login', 'verify', 'confirm', 'update', 'urgent',
+    'act-now', 'bitcoin', 'wallet', 'paypal', 'amazon', 'bank', 'admin', 'panel',
+    'alert', 'warning', 'secure', 'verify-account',
+])
+
+_TYPO_DOMAINS = {
+    'paypa1': 'PayPal typosquatting',
+    'amaz0n': 'Amazon typosquatting',
+    'goog1e': 'Google typosquatting',
+    'faceb00k': 'Facebook typosquatting',
+}
+
+_SUSPICIOUS_TLDS = frozenset(['.us', '.tk', '.biz', '.top', '.cn', '.ml', '.su', '.space', '.cf', '.co', '.info', '.pw', '.online', '.ga', '.cc', '.club', '.xyz', '.ru', 'xyz', '.website', '.site', '.io', '.win'])
+
+_FAKE_DOMAINS = frozenset(['.fake', '.scam', '.suspicious', '.test', '.invalid', '.example', '.localhost', '.local', '.onion', '.bit', '.eth', '.tor', '.i2p', '.zip', '.review', '.bid', '.loan', ])
+
+_IP_RE = re.compile(r'^https?://\d+\.\d+\.\d+\.\d+')
+
+_SCORE_CAP = 100
+
+
+def _get_tld(url: str) -> str:
+    """Extract the TLD from a URL, handling missing schemes."""
+    try:
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+        host = urlparse(url).hostname or ''
+        dot = host.rfind('.')
+        return host[dot:] if dot != -1 else ''
+    except Exception:
+        return ''
+
+
+def scan_urls(urls: list[str]) -> list[dict]:
+    """Scan URLs for phishing/scam patterns."""
     results = []
+    
+
     for url in urls:
         try:
             url_lower = url.lower()
             score = 0
             patterns_found = []
-            
-            # Check for suspicious patterns
-            for pattern in phishing_patterns:
-                if pattern in url_lower:
+
+            # Keyword scan — each hit +15
+            for kw in _PHISHING_KEYWORDS:
+                if kw in url_lower:
                     score += 15
-                    patterns_found.append(pattern)
-            
-            # Check for typosquatting common domains
-            typo_domains = {
-                'paypa1': 'PayPal typosquatting',
-                'amaz0n': 'Amazon typosquatting',
-                'goog1e': 'Google typosquatting',
-                'faceb00k': 'Facebook typosquatting',
-            }
-            
-            for typo, reason in typo_domains.items():
-                if typo in url_lower:
-                    score += 20
-                    patterns_found.append(reason)
-            
-            # Check for suspicious TLDs
-            suspicious_tlds = ['.tk', '.ml', '.ga', '.cf']
-            for tld in suspicious_tlds:
-                if url.endswith(tld):
+                    patterns_found.append(kw)
+                    if score >= _SCORE_CAP:
+                        break
+
+            # Typosquatting — +20 each
+            if score < _SCORE_CAP:
+                for typo, reason in _TYPO_DOMAINS.items():
+                    if typo in url_lower:
+                        score += 20
+                        patterns_found.append(reason)
+                        if score >= _SCORE_CAP:
+                            break
+
+            # Suspicious TLD — +10
+            if score < _SCORE_CAP:
+                tld = _get_tld(url)
+                print(f"Extracted TLD: {tld} from URL: {url}")
+                if tld in _SUSPICIOUS_TLDS:
                     score += 10
                     patterns_found.append(f'Suspicious TLD: {tld}')
-            
-            # Check for IP addresses instead of domains
-            if re.match(r'http[s]?://\d+\.\d+\.\d+\.\d+', url):
+
+            # IP address instead of domain — +25
+            if score < _SCORE_CAP and _IP_RE.match(url):
                 score += 25
                 patterns_found.append('IP address used instead of domain')
-            
-            # Fake domains with common patterns
-            if any(x in url_lower for x in ['.fake', '.scam', '.suspicious', '.test']):
-                score += 30
-                patterns_found.append('Clearly fake/test domain')
-            
-            # Cap score at 100
-            score = min(score, 100)
-            
+
+            # Clearly fake/test domain — +30
+            if score < _SCORE_CAP:
+                tld = tld if 'tld' in dir() else _get_tld(url)
+                if tld in _FAKE_DOMAINS:
+                    score += 30
+                    patterns_found.append('Clearly fake/test domain')
+
             results.append({
                 'url': url,
                 'isSuspicious': score >= 50,
-                'score': score,
-                'patterns': patterns_found
+                'score': min(score, _SCORE_CAP),
+                'patterns': patterns_found,
             })
+
         except Exception as e:
             results.append({
                 'url': url,
                 'isSuspicious': False,
                 'score': 0,
-                'patterns': [f'Error scanning: {str(e)}']
+                'patterns': [f'Error scanning: {e}'],
             })
-    
+
     return results
 
 # API Endpoints
